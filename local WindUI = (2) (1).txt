@@ -1,0 +1,2447 @@
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = "Astryx",
+    SubTitle = "Volleyball Legends",
+    Author = "Astryz Team",
+    Folder = "AnonyHubConfigs",
+    Icon = "rbxassetid://102446662507634",
+    Size = UDim2.fromOffset(320, 360),
+    Theme = "Dark",
+    Acrylic = true,
+    Transparent = true,
+    User = {
+        Enabled = true,
+        Anonymous = false
+    }
+})
+
+WindUI:Notify({
+    Title = "Astryz Hub",
+    Content = "Loaded successfully!",
+    Duration = 3
+})
+
+local MainTab = Window:Tab({
+    Title = "Main",
+    Icon = "layers"
+})
+
+local CharacterTab = Window:Tab({
+    Title = "Character",
+    Icon = "user"
+})
+
+local VisualTab = Window:Tab({
+    Title = "Visual",
+    Icon = "eye"
+})
+
+local MiscTab = Window:Tab({
+    Title = "Misc",
+    Icon = "settings"
+})
+
+local GameJoinTab = Window:Tab({
+    Title = "Game Join",
+    Icon = "gamepad"
+})
+
+local ConfigTab = Window:Tab({
+    Title = "Config",
+    Icon = "settings"
+})
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local Lighting = game:GetService("Lighting")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local API_URL = "https://anony-hub-production.up.railway.app"
+
+local function rejoin()
+    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+end
+
+local hitboxScale = 5.0
+local hitboxColor = Color3.fromRGB(0, 255, 0)
+local linesEnabled = true
+local lineDistance = 90
+local lines = {}
+local espEnabled = true
+local espHighlights = {}
+local espConnections = {}
+local autoShiftLock = false
+local airMovement = false
+local airMovementSpeed = 16
+local bodyVelocity = nil
+local hitboxColorName = "Green"
+
+local lineColors = {
+    Color3.fromRGB(255, 0, 0),
+    Color3.fromRGB(0, 255, 0),
+    Color3.fromRGB(0, 0, 255),
+    Color3.fromRGB(255, 165, 0),
+    Color3.fromRGB(128, 0, 128),
+    Color3.fromRGB(255, 255, 0),
+    Color3.fromRGB(139, 0, 0),
+    Color3.fromRGB(0, 100, 0)
+}
+
+local autoRotateConnection
+
+local function autorotateon()
+    if autoRotateConnection then 
+        autorotateoff() 
+    end
+    autoRotateConnection = RunService.Heartbeat:Connect(function()
+        local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        if humanoid and humanoid.AutoRotate == false then
+            humanoid.AutoRotate = true
+        end
+    end)
+end
+
+local function autorotateoff()
+    if autoRotateConnection then
+        autoRotateConnection:Disconnect()
+        autoRotateConnection = nil
+    end
+end
+
+local function findFirstPart(model)
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            return descendant
+        end
+    end
+    return nil
+end
+
+local function updateHitboxes(scale)
+    for _, model in ipairs(Workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            local ball = model:FindFirstChild("Ball.001")
+            if not ball then
+                local basePart = findFirstPart(model)
+                if basePart then
+                    ball = Instance.new("Part")
+                    ball.Name = "Ball.001"
+                    ball.Shape = Enum.PartType.Ball
+                    ball.Size = Vector3.new(2, 2, 2) * scale
+                    ball.CFrame = basePart.CFrame
+                    ball.Anchored = true
+                    ball.CanCollide = false
+                    ball.Transparency = 0.7
+                    ball.Material = Enum.Material.ForceField
+                    ball.Color = hitboxColor
+                    ball.Parent = model
+                end
+            else
+                ball.Size = Vector3.new(3, 3, 3) * scale
+                ball.Color = hitboxColor
+            end
+        end
+    end
+end
+
+local function removeHitboxes()
+    for _, model in ipairs(Workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            local ball = model:FindFirstChild("Ball.001")
+            if ball then
+                ball:Destroy()
+            end
+        end
+    end
+end
+
+workspace.ChildAdded:Connect(function(child)
+    if child:IsA("Model") and child.Name:match("^CLIENT_BALL_%d+$") then
+        task.wait(0.1)
+        updateHitboxes(hitboxScale)
+    end
+end)
+
+updateHitboxes(5.0)
+
+local BallService = nil
+local Knit = ReplicatedStorage:FindFirstChild("Packages")
+if Knit then
+    Knit = Knit:FindFirstChild("_Index")
+end
+if Knit then
+    Knit = Knit:FindFirstChild("sleitnick_knit@1.7.0")
+end
+if Knit then
+    Knit = Knit:FindFirstChild("knit")
+end
+if Knit then
+    Knit = Knit:FindFirstChild("Services")
+end
+if Knit then
+    BallService = Knit:FindFirstChild("BallService")
+end
+
+local ballId = nil
+local silentSpikeEnabled = false
+local spikeKeybind = Enum.KeyCode.R
+local spikeCooldown = false
+
+local function getBallId()
+    for _, model in ipairs(Workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            local id = model.Name:match("%d+")
+            if id then
+                return tonumber(id)
+            end
+        end
+    end
+    return nil
+end
+
+local function findBallId()
+    ballId = getBallId()
+end
+
+findBallId()
+
+Workspace.DescendantAdded:Connect(function(descendant)
+    if descendant:IsA("Model") and descendant.Name:match("^CLIENT_BALL_%d+$") then
+        findBallId()
+    end
+end)
+
+local function spikeBall()
+    if not silentSpikeEnabled then return end
+    if spikeCooldown then return end
+    if not ballId then
+        findBallId()
+        if not ballId then
+            return
+        end
+    end
+    if not BallService then return end
+    
+    spikeCooldown = true
+    task.spawn(function()
+        task.wait(0.2)
+        spikeCooldown = false
+    end)
+    
+    local lookVector = Camera.CFrame.LookVector
+    local RF = BallService:FindFirstChild("RF")
+    if RF then
+        local Interact = RF:FindFirstChild("Interact")
+        if Interact then
+            Interact:InvokeServer({
+                ["Charge"] = 1,
+                ["Move"] = "Spike",
+                ["SpecialCharge"] = 0,
+                ["TiltDirection"] = Vector3.new(0, 1, 0),
+                ["LookVector"] = lookVector,
+                ["MoveDirection"] = Vector3.new(0, 0, 0),
+                ["ClientCanRunSpecial"] = false,
+                ["From"] = "Client",
+                ["Timestamp"] = tick(),
+                ["BallId"] = ballId,
+                ["CustomClient"] = {},
+            })
+        end
+    end
+end
+
+local function createSpikeButton()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "SilentSpikeGUI"
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    local spikeButton = Instance.new("TextButton")
+    spikeButton.Size = UDim2.new(0, 50, 0, 50)
+    spikeButton.Position = UDim2.new(0.5, -25, 0.8, -25)
+    spikeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    spikeButton.Text = "Spike"
+    spikeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    spikeButton.TextScaled = true
+    spikeButton.Font = Enum.Font.GothamBold
+    spikeButton.Parent = screenGui
+    spikeButton.BackgroundTransparency = 0.2
+    spikeButton.BorderSizePixel = 0
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = spikeButton
+    
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    spikeButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = spikeButton.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    spikeButton.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            spikeButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    spikeButton.MouseButton1Click:Connect(function()
+        spikeBall()
+    end)
+    
+    spikeButton.Visible = false
+    return spikeButton
+end
+
+local spikeButton = createSpikeButton()
+
+MainTab:Section({ Title = "Hitbox Settings" })
+
+MainTab:Slider({
+    Title = "Hitbox Size",
+    Desc = "Adjust hitbox scale",
+    Value = {Min = 0, Max = 20, Default = 5},
+    Step = 0.1,
+    Callback = function(value)
+        hitboxScale = value
+        updateHitboxes(value)
+        WindUI:Notify({ Title = "Size Changed", Content = "Hitbox scale set to " .. value .. "x", Duration = 2 })
+    end
+})
+
+MainTab:Dropdown({
+    Title = "Hitbox Color",
+    Desc = "Select hitbox color",
+    Values = {"Green", "Blue", "Red", "Yellow", "Purple", "Orange", "Pink", "White"},
+    Multi = false,
+    Default = "Green",
+    Callback = function(selected)
+        local colors = {
+            Green = Color3.fromRGB(0, 255, 0),
+            Blue = Color3.fromRGB(0, 0, 255),
+            Red = Color3.fromRGB(255, 0, 0),
+            Yellow = Color3.fromRGB(255, 255, 0),
+            Purple = Color3.fromRGB(128, 0, 128),
+            Orange = Color3.fromRGB(255, 165, 0),
+            Pink = Color3.fromRGB(255, 105, 180),
+            White = Color3.fromRGB(255, 255, 255)
+        }
+        hitboxColor = colors[selected] or Color3.fromRGB(0, 255, 0)
+        hitboxColorName = selected
+        updateHitboxes(hitboxScale)
+        WindUI:Notify({ Title = "Color Changed", Content = "Hitbox color set to " .. selected, Duration = 2 })
+    end
+})
+
+MainTab:Button({
+    Title = "Remove Hitboxes",
+    Desc = "Remove all hitboxes",
+    Callback = function()
+        removeHitboxes()
+        WindUI:Notify({ Title = "Hitboxes Removed", Content = "All hitboxes cleared", Duration = 2 })
+    end
+})
+
+MainTab:Section({ Title = "Spike Settings" })
+
+MainTab:Toggle({
+    Title = "Silent Spike",
+    Desc = "Press R or click Spike button",
+    Value = false,
+    Callback = function(state)
+        silentSpikeEnabled = state
+        if spikeButton then
+            spikeButton.Visible = state
+        end
+    end
+})
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == spikeKeybind then
+        spikeBall()
+    end
+end)
+
+local redirectSpikeEnabled = false
+local redirectHookActive = false
+local oldNamecallRedirect = nil
+local mtRedirect = nil
+
+local function enableRedirectSpike()
+    if redirectHookActive then return end
+    
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    local camera = workspace.CurrentCamera
+    
+    local Knit = ReplicatedStorage.Packages._Index["sleitnick_knit@1.7.0"].knit
+    local interact = Knit.Services.BallService.RF.Interact
+    
+    getgenv().DirectionEnabled = true
+    getgenv().UseCameraDirection = true
+    
+    mtRedirect = getrawmetatable(game)
+    oldNamecallRedirect = mtRedirect.__namecall
+    setreadonly(mtRedirect, false)
+    
+    mtRedirect.__namecall = function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        if self == interact and method == "InvokeServer" then
+            local data = args[1]
+            if type(data) == "table" and data.Move == "Spike" and getgenv().DirectionEnabled then
+                local dir
+                if getgenv().UseCameraDirection and camera then
+                    dir = camera.CFrame.LookVector
+                else
+                    dir = getgenv().SpikeDirection or Vector3.new(0, 0, -1)
+                end
+                data.LookVector = dir
+                data.Direction = dir
+                if data.MoveDirection then
+                    data.MoveDirection = dir
+                end
+            end
+            return oldNamecallRedirect(self, data)
+        end
+        
+        return oldNamecallRedirect(self, ...)
+    end
+    
+    setreadonly(mtRedirect, true)
+    redirectHookActive = true
+    redirectSpikeEnabled = true
+end
+
+local function disableRedirectSpike()
+    if not redirectHookActive then return end
+    
+    if mtRedirect and oldNamecallRedirect then
+        setreadonly(mtRedirect, false)
+        mtRedirect.__namecall = oldNamecallRedirect
+        setreadonly(mtRedirect, true)
+    end
+    
+    redirectHookActive = false
+    redirectSpikeEnabled = false
+    getgenv().DirectionEnabled = false
+    oldNamecallRedirect = nil
+    mtRedirect = nil
+end
+
+MainTab:Toggle({
+    Title = "Redirect Spike",
+    Desc = "Redirect spike direction to camera",
+    Value = false,
+    Callback = function(state)
+        redirectSpikeEnabled = state
+        if state then
+            enableRedirectSpike()
+            WindUI:Notify({ Title = "Redirect Spike", Content = "ENABLED", Duration = 2 })
+        else
+            disableRedirectSpike()
+            WindUI:Notify({ Title = "Redirect Spike", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Section({ Title = "Tilt Settings" })
+
+local sanjuTiltEnabled = false
+local tiltHookActive = false
+local oldNamecall = nil
+local mt = nil
+
+local function enableSanjuTilt()
+    if tiltHookActive then return end
+    
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    
+    local Knit = ReplicatedStorage.Packages._Index["sleitnick_knit@1.7.0"].knit
+    local BallService = Knit.Services.BallService.RF
+    local interact = BallService.Interact
+    
+    mt = getrawmetatable(game)
+    oldNamecall = mt.__namecall
+    setreadonly(mt, false)
+    
+    mt.__namecall = function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        if self == interact and method == "InvokeServer" then
+            local data = args[1]
+            if type(data) == "table" and data.Move == "Spike" then
+                if data.TiltDirection and data.LookVector then
+                    local tiltDir = data.TiltDirection
+                    
+                    if math.abs(tiltDir.X) > 0.01 or math.abs(tiltDir.Z) > 0.01 then
+                        local lookVec = data.LookVector
+                        data.LookVector = Vector3.new(
+                            lookVec.X + tiltDir.X * 0.3,
+                            lookVec.Y,
+                            lookVec.Z + tiltDir.Z * 0.3
+                        ).Unit
+                        data.TiltDirection = Vector3.new(
+                            tiltDir.X * 1.35,
+                            tiltDir.Y,
+                            tiltDir.Z * 1.35
+                        )
+                    end
+                end
+            end
+        end
+        
+        return oldNamecall(self, ...)
+    end
+    
+    setreadonly(mt, true)
+    tiltHookActive = true
+    sanjuTiltEnabled = true
+end
+
+local function disableSanjuTilt()
+    if not tiltHookActive then return end
+    
+    if mt and oldNamecall then
+        setreadonly(mt, false)
+        mt.__namecall = oldNamecall
+        setreadonly(mt, true)
+    end
+    
+    tiltHookActive = false
+    sanjuTiltEnabled = false
+    oldNamecall = nil
+    mt = nil
+end
+
+MainTab:Toggle({
+    Title = "Sanju Tilt",
+    Desc = "Enhanced tilt for Sanju style",
+    Value = false,
+    Callback = function(state)
+        if state then
+            enableSanjuTilt()
+            WindUI:Notify({ Title = "Sanju Tilt", Content = "ENABLED", Duration = 2 })
+        else
+            disableSanjuTilt()
+            WindUI:Notify({ Title = "Sanju Tilt", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+local maxChargeEnabled = false
+local maxChargeHookActive = false
+local oldNamecallMaxCharge = nil
+local mtMaxCharge = nil
+
+local function enableMaxCharge()
+    if maxChargeHookActive then return end
+    
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    
+    local Knit = ReplicatedStorage.Packages._Index["sleitnick_knit@1.7.0"].knit
+    local interact = Knit.Services.BallService.RF.Interact
+    
+    mtMaxCharge = getrawmetatable(game)
+    oldNamecallMaxCharge = mtMaxCharge.__namecall
+    setreadonly(mtMaxCharge, false)
+    
+    mtMaxCharge.__namecall = function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        if self == interact and method == "InvokeServer" then
+            local data = args[1]
+            if type(data) == "table" and data.Move == "Spike" then
+                data.Charge = 1.0
+                data.SpecialCharge = 1.0
+            end
+            return oldNamecallMaxCharge(self, data)
+        end
+        
+        return oldNamecallMaxCharge(self, ...)
+    end
+    
+    setreadonly(mtMaxCharge, true)
+    maxChargeHookActive = true
+    maxChargeEnabled = true
+end
+
+local function disableMaxCharge()
+    if not maxChargeHookActive then return end
+    
+    if mtMaxCharge and oldNamecallMaxCharge then
+        setreadonly(mtMaxCharge, false)
+        mtMaxCharge.__namecall = oldNamecallMaxCharge
+        setreadonly(mtMaxCharge, true)
+    end
+    
+    maxChargeHookActive = false
+    maxChargeEnabled = false
+    oldNamecallMaxCharge = nil
+    mtMaxCharge = nil
+end
+
+MainTab:Toggle({
+    Title = "Max Charge Special",
+    Desc = "Ronin TSH Encho Akari",
+    Value = false,
+    Callback = function(state)
+        if state then
+            enableMaxCharge()
+            WindUI:Notify({ Title = "Max Charge Special", Content = "ENABLED", Duration = 2 })
+        else
+            disableMaxCharge()
+            WindUI:Notify({ Title = "Max Charge Special", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Section({ Title = "Ability Settings" })
+
+MainTab:Paragraph({
+    Title = "This works only in Ability:",
+    Content = "Lead Feet, Boom Jump, Redirection Jump, Rolling Thunder"
+})
+
+local infChargeEnabled = false
+local Remote = game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.AbilityService.RE.AbilityAction
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local AbilityButton = PlayerGui.Interface.Game.InGameActionsBar.Mobile.Ability
+local currentAbility = nil
+local buttonConnection = nil
+
+if firesignal then
+    local oldFireSignal = firesignal
+    firesignal = function(signal, ...)
+        local args = {...}
+        
+        if signal == Remote.OnClientEvent then
+            if args[1] then
+                currentAbility = args[1]
+            end
+        end
+        
+        return oldFireSignal(signal, unpack(args))
+    end
+end
+
+Remote.OnClientEvent:Connect(function(...)
+    local args = {...}
+    if args[1] then
+        currentAbility = args[1]
+    end
+end)
+
+local function fireAbility()
+    if infChargeEnabled and currentAbility then
+        if firesignal then
+            firesignal(Remote.OnClientEvent, currentAbility)
+        end
+    end
+end
+
+MainTab:Toggle({
+    Title = "Inf Charge Ability",
+    Desc = "Auto-use ability when charged (Press F)",
+    Value = false,
+    Callback = function(state)
+        infChargeEnabled = state
+        if state then
+            WindUI:Notify({ Title = "Inf Charge Ability", Content = "ENABLED", Duration = 2 })
+        else
+            WindUI:Notify({ Title = "Inf Charge Ability", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+if AbilityButton then
+    if buttonConnection then
+        buttonConnection:Disconnect()
+    end
+    
+    if AbilityButton:IsA("TextButton") or AbilityButton:IsA("ImageButton") then
+        buttonConnection = AbilityButton.MouseButton1Click:Connect(function()
+            fireAbility()
+        end)
+    elseif AbilityButton:IsA("GuiButton") then
+        buttonConnection = AbilityButton.Activated:Connect(function()
+            fireAbility()
+        end)
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.F then
+        fireAbility()
+    end
+end)
+
+MainTab:Section({ Title = "Camera Settings" })
+
+MainTab:Slider({
+    Title = "POV",
+    Desc = "Adjust field of view",
+    Value = {Min = 1, Max = 120, Default = 70},
+    Step = 0.1,
+    Callback = function(value)
+        workspace.CurrentCamera.FieldOfView = value
+    end
+})
+
+MainTab:Section({ Title = "Player Settings" })
+
+MainTab:Toggle({
+    Title = "Rotate while Jumping",
+    Desc = "Auto rotate in air",
+    Value = false,
+    Callback = function(state)
+        if state then
+            autorotateon()
+        else
+            autorotateoff()
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "Anti-Lag",
+    Desc = "Reduce lag and improve performance",
+    Value = false,
+    Callback = function(state)
+        if state then
+            pcall(function()
+                local GraphicsQuality = tonumber(game:GetEngineStats().GraphicsQuality)
+                if GraphicsQuality and GraphicsQuality > 3 then
+                    game:SetGraphicsQuality(3)
+                end
+                
+                if Lighting:FindFirstChild("BloomEffect") then
+                    Lighting.BloomEffect.Enabled = false
+                end
+                if Lighting:FindFirstChild("BlurEffect") then
+                    Lighting.BlurEffect.Enabled = false
+                end
+                if Lighting:FindFirstChild("SunRaysEffect") then
+                    Lighting.SunRaysEffect.Enabled = false
+                end
+                if Lighting:FindFirstChild("ColorCorrectionEffect") then
+                    Lighting.ColorCorrectionEffect.Enabled = false
+                end
+                if Lighting:FindFirstChild("DepthOfFieldEffect") then
+                    Lighting.DepthOfFieldEffect.Enabled = false
+                end
+                
+                Lighting.ShadowSoftness = 1.5
+                Lighting.ShadowsEnabled = false
+                Lighting.GlobalShadows = false
+                
+                settings().Rendering.QualityLevel = 1
+                settings().Rendering.ShadowQuality = 0
+            end)
+            WindUI:Notify({ Title = "Anti-Lag", Content = "ENABLED", Duration = 2 })
+        else
+            pcall(function()
+                settings().Rendering.QualityLevel = 3
+                settings().Rendering.ShadowQuality = 2
+                Lighting.ShadowsEnabled = true
+                Lighting.GlobalShadows = true
+                
+                if Lighting:FindFirstChild("BloomEffect") then
+                    Lighting.BloomEffect.Enabled = true
+                end
+                if Lighting:FindFirstChild("BlurEffect") then
+                    Lighting.BlurEffect.Enabled = true
+                end
+                if Lighting:FindFirstChild("SunRaysEffect") then
+                    Lighting.SunRaysEffect.Enabled = true
+                end
+            end)
+            WindUI:Notify({ Title = "Anti-Lag", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Section({ Title = "Jump" })
+
+local fastAttackEnabled = false
+local fastAttackManualEnabled = false
+local jumpSpikeEnabled = false
+local teleportCooldown = false
+local Court = workspace:WaitForChild("Map"):WaitForChild("Court")
+local Boundary = workspace.Map.BallNoCollide.Boundaries.Part
+
+local function getStrictFrontCourtPosition(rootPart)
+    if not Court or not rootPart then return nil end
+    
+    local courtCFrame = Court:IsA("Model") and Court:GetPivot() or Court.CFrame
+    local courtSize = Court:IsA("Model") and Court:GetExtentsSize() or Court.Size
+    
+    for i = 1, 20 do
+        local randomX = (math.random() - 0.5) * courtSize.X
+        local randomZ = (math.random() - 0.5) * courtSize.Z
+        local randomOffset = Vector3.new(randomX, 0, randomZ)
+        local chosenPosition = (courtCFrame * CFrame.new(randomOffset)).Position
+        
+        local directionToSpot = (chosenPosition - rootPart.Position).Unit
+        local lookDirection = rootPart.CFrame.LookVector
+        
+        if lookDirection:Dot(directionToSpot) > 0.85 then
+            return chosenPosition
+        end
+    end
+    
+    return rootPart.Position + rootPart.CFrame.LookVector * 10
+end
+
+local function faceStrictFrontSpotMidAir()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local targetSpot = getStrictFrontCourtPosition(rootPart)
+    if not targetSpot then return end
+    
+    local targetLookPosition = Vector3.new(targetSpot.X, rootPart.Position.Y, targetSpot.Z)
+    rootPart.CFrame = CFrame.lookAt(rootPart.Position, targetLookPosition)
+end
+
+local function virtualClick()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    
+    local screenCenter = camera.ViewportSize / 2
+    
+    VirtualInputManager:SendMouseButtonEvent(screenCenter.X, screenCenter.Y, 0, true, game, 0)
+    task.wait(0.005)
+    VirtualInputManager:SendMouseButtonEvent(screenCenter.X, screenCenter.Y, 0, false, game, 0)
+end
+
+local function dropToGround()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local rayOrigin = rootPart.Position
+    local rayDirection = Vector3.new(0, -1000, 0)
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {character}
+    
+    local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+    
+    if result then
+        local groundPosition = result.Position + Vector3.new(0, 3, 0)
+        rootPart.CFrame = CFrame.new(groundPosition) * (rootPart.CFrame - rootPart.Position)
+    end
+end
+
+local function teleportToGroundManual()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local rayOrigin = rootPart.Position
+    local rayDirection = Vector3.new(0, -1000, 0)
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {character}
+    
+    local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+    
+    if result then
+        local groundPosition = result.Position + Vector3.new(0, 3, 0)
+        local randomY = math.random(0, 360)
+        rootPart.CFrame = CFrame.new(groundPosition) * CFrame.Angles(0, math.rad(randomY), 0)
+    end
+end
+
+local function getBallJumpSpike()
+    local closestBall = nil
+    local closestDistance = math.huge
+    
+    for _, model in ipairs(workspace:GetChildren()) do
+        if model:IsA("Model") and model.Name:match("^CLIENT_BALL_%d+$") then
+            for _, part in ipairs(model:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local character = LocalPlayer.Character
+                    if character then
+                        local rootPart = character:FindFirstChild("HumanoidRootPart")
+                        if rootPart then
+                            local distance = (part.Position - rootPart.Position).Magnitude
+                            if distance < closestDistance then
+                                closestDistance = distance
+                                closestBall = part
+                            end
+                        end
+                    end
+                    return part
+                end
+            end
+        end
+    end
+    return closestBall
+end
+
+local function isBallOnMySide(ballPos)
+    if not Boundary then return true end
+    local boundaryPos = Boundary.Position
+    local playerPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not playerPos then return true end
+    
+    local playerSide = playerPos.Position.Z > boundaryPos.Z
+    local ballSide = ballPos.Z > boundaryPos.Z
+    
+    return playerSide == ballSide
+end
+
+local function teleportToBallJumpSpike()
+    if teleportCooldown then return end
+    teleportCooldown = true
+    
+    task.spawn(function()
+        task.wait(0.5)
+        teleportCooldown = false
+    end)
+    
+    local character = LocalPlayer.Character
+    if not character then 
+        teleportCooldown = false
+        return 
+    end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then 
+        teleportCooldown = false
+        return 
+    end
+    
+    local ball = getBallJumpSpike()
+    if ball then
+        if not isBallOnMySide(ball.Position) then
+            teleportCooldown = false
+            return
+        end
+        
+        local currentLook = rootPart.CFrame.LookVector
+        local newPosition = ball.Position - Vector3.new(0, 2, 0)
+        rootPart.CFrame = CFrame.new(newPosition)
+        rootPart.CFrame = CFrame.new(rootPart.Position, rootPart.Position + currentLook)
+        rootPart.Velocity = Vector3.new(0, 0, 0)
+        rootPart.RotVelocity = Vector3.new(0, 0, 0)
+    end
+    
+    teleportCooldown = false
+end
+
+local jumpConnection = nil
+
+local function handleJump()
+    if fastAttackEnabled then
+        task.wait(0.3)
+        faceStrictFrontSpotMidAir()
+        task.wait(0.01)
+        virtualClick()
+        dropToGround()
+    end
+    
+    if fastAttackManualEnabled then
+        task.wait(0.3)
+        teleportToGroundManual()
+    end
+    
+    if jumpSpikeEnabled then
+        task.wait(0.35)
+        teleportToBallJumpSpike()
+    end
+end
+
+local function enableJumps()
+    if jumpConnection then return end
+    jumpConnection = UserInputService.JumpRequest:Connect(function()
+        handleJump()
+    end)
+end
+
+local function disableJumps()
+    if jumpConnection then
+        jumpConnection:Disconnect()
+        jumpConnection = nil
+    end
+end
+
+MainTab:Toggle({
+    Title = "Fast Attack",
+    Desc = "Jump + Auto Spike",
+    Value = false,
+    Callback = function(state)
+        fastAttackEnabled = state
+        if state then
+            enableJumps()
+            WindUI:Notify({ Title = "Fast Attack", Content = "ENABLED", Duration = 2 })
+        else
+            if not fastAttackManualEnabled and not jumpSpikeEnabled then
+                disableJumps()
+            end
+            WindUI:Notify({ Title = "Fast Attack", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "Fast Attack Manual",
+    Desc = "Manual Click ur Spike",
+    Value = false,
+    Callback = function(state)
+        fastAttackManualEnabled = state
+        if state then
+            enableJumps()
+            WindUI:Notify({ Title = "Fast Attack Manual", Content = "ENABLED", Duration = 2 })
+        else
+            if not fastAttackEnabled and not jumpSpikeEnabled then
+                disableJumps()
+            end
+            WindUI:Notify({ Title = "Fast Attack Manual", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "Jump Spike",
+    Desc = "Jump to ball (Only works on your side)",
+    Value = false,
+    Callback = function(state)
+        jumpSpikeEnabled = state
+        if state then
+            enableJumps()
+            WindUI:Notify({ Title = "Jump Spike", Content = "ENABLED", Duration = 2 })
+        else
+            if not fastAttackEnabled and not fastAttackManualEnabled then
+                disableJumps()
+            end
+            WindUI:Notify({ Title = "Jump Spike", Content = "DISABLED", Duration = 2 })
+        end
+    end
+})
+
+MainTab:Section({ Title = "Utility" })
+
+MainTab:Button({
+    Title = "Rejoin",
+    Desc = "Rejoin the game",
+    Callback = function()
+        rejoin()
+    end
+})
+
+MainTab:Button({
+    Title = "Panic",
+    Desc = "Turn off all features",
+    Callback = function()
+        removeHitboxes()
+        autoShiftLock = false
+        airMovement = false
+        linesEnabled = false
+        silentSpikeEnabled = false
+        fastAttackEnabled = false
+        fastAttackManualEnabled = false
+        jumpSpikeEnabled = false
+        infChargeEnabled = false
+        sanjuTiltEnabled = false
+        redirectSpikeEnabled = false
+        maxChargeEnabled = false
+        disableJumps()
+        disableSanjuTilt()
+        disableRedirectSpike()
+        disableMaxCharge()
+        if spikeButton then
+            spikeButton.Visible = false
+        end
+        for player in pairs(lines) do
+            removeLine(player)
+        end
+        WindUI:Notify({ Title = "Panic Mode", Content = "All features disabled", Duration = 3 })
+    end
+})
+
+local function getWalkSpeed()
+    local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+    return humanoid and humanoid.WalkSpeed or 16
+end
+
+local function applyAirControl(rootPart)
+    if bodyVelocity then return end
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(1e5, 0, 1e5)
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.P = 2500
+    bodyVelocity.Name = "AirControlVelocity"
+    bodyVelocity.Parent = rootPart
+end
+
+local function removeAirControl()
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+end
+
+local function setupCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+    airMovementSpeed = getWalkSpeed()
+
+    humanoid:GetPropertyChangedSignal("Jump"):Connect(function()
+        if humanoid.Jump then
+            if autoShiftLock then
+                task.defer(function()
+                    task.wait(0.03)
+                    local lookVector = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z)
+                    if lookVector.Magnitude > 0 then
+                        rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookVector.Unit)
+                        humanoid.AutoRotate = false
+                    end
+                end)
+            else
+                humanoid.AutoRotate = true
+            end
+        end
+    end)
+
+    humanoid.StateChanged:Connect(function(oldState, newState)
+        if newState == Enum.HumanoidStateType.Freefall then
+            if airMovement then
+                applyAirControl(rootPart)
+            end
+        elseif newState == Enum.HumanoidStateType.Landed then
+            removeAirControl()
+            humanoid.AutoRotate = true
+        end
+    end)
+end
+
+if LocalPlayer.Character then
+    setupCharacter(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(setupCharacter)
+
+RunService.RenderStepped:Connect(function()
+    if airMovement and bodyVelocity and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            bodyVelocity.Velocity = humanoid.MoveDirection * airMovementSpeed
+        end
+    end
+end)
+
+CharacterTab:Section({ Title = "Attributes" })
+
+local diveSpeedInput = CharacterTab:Input({
+    Title = "Dive Speed",
+    Desc = "Enter dive speed value",
+    Value = "0.95",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then
+            game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_DiveSpeed", num)
+        end
+    end
+})
+
+local jumpPowerInput = CharacterTab:Input({
+    Title = "Jump Power",
+    Desc = "Enter jump power value",
+    Value = "1.1",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then
+            game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_JumpPower", num)
+        end
+    end
+})
+
+local speedInput = CharacterTab:Input({
+    Title = "Speed",
+    Desc = "Enter speed value",
+    Value = "0.85",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then
+            game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_Speed", num)
+        end
+    end
+})
+
+task.spawn(function()
+    game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_DiveSpeed", 0.95)
+    game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_JumpPower", 1.1)
+    game:GetService("Players").LocalPlayer:SetAttribute("Multiplier_Speed", 0.85)
+end)
+
+CharacterTab:Section({ Title = "Movement" })
+
+CharacterTab:Toggle({
+    Title = "Auto Shift Lock",
+    Desc = "Auto shift lock when jumping",
+    Value = false,
+    Callback = function(state)
+        autoShiftLock = state
+    end
+})
+
+CharacterTab:Toggle({
+    Title = "Air Movement",
+    Desc = "Freeflight in air",
+    Value = false,
+    Callback = function(state)
+        airMovement = state
+        if not state then
+            if bodyVelocity then
+                bodyVelocity:Destroy()
+                bodyVelocity = nil
+            end
+        end
+    end
+})
+
+CharacterTab:Slider({
+    Title = "Air Movement Speed",
+    Desc = "Speed while in air",
+    Value = {Min = 0, Max = 100, Default = 16},
+    Step = 0.1,
+    Callback = function(value)
+        airMovementSpeed = value
+    end
+})
+
+local function removeLine(player)
+    local data = lines[player]
+    if data then
+        if data.beam then data.beam:Destroy() end
+        if data.target and data.target.Parent then data.target:Destroy() end
+        if data.attachment and data.attachment.Parent then data.attachment:Destroy() end
+        lines[player] = nil
+    end
+end
+
+local function updateLine(player, index)
+    if not linesEnabled then
+        removeLine(player)
+        return
+    end
+
+    local character = player.Character
+    if not character or not character:FindFirstChild("Head") or not character:FindFirstChild("HumanoidRootPart") then
+        removeLine(player)
+        return
+    end
+
+    local head = character.Head
+    local rootPart = character.HumanoidRootPart
+
+    if not lines[player] then
+        local attachment = Instance.new("Attachment", head)
+        local target = Instance.new("Part")
+        target.Anchored = true
+        target.CanCollide = false
+        target.Transparency = 1
+        target.Size = Vector3.new(0.1, 0.1, 0.1)
+        target.Parent = Workspace
+
+        local targetAttachment = Instance.new("Attachment", target)
+        local beam = Instance.new("Beam")
+        beam.Attachment0 = attachment
+        beam.Attachment1 = targetAttachment
+        beam.Width0 = 0.25
+        beam.Width1 = 0.25
+        beam.FaceCamera = true
+        beam.LightEmission = 1
+        beam.Transparency = NumberSequence.new(0.3)
+        beam.Color = ColorSequence.new(lineColors[(index - 1) % #lineColors + 1])
+        beam.Parent = head
+
+        lines[player] = { beam = beam, target = target, attachment = attachment }
+    end
+
+    local data = lines[player]
+    data.target.Position = head.Position + rootPart.CFrame.LookVector * lineDistance
+end
+
+local frameCounter = 0
+RunService.RenderStepped:Connect(function()
+    frameCounter = frameCounter + 1
+    if frameCounter % 2 ~= 0 then return end
+    
+    if linesEnabled then
+        for index, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Team ~= LocalPlayer.Team then
+                updateLine(player, index)
+            else
+                removeLine(player)
+            end
+        end
+    else
+        for player in pairs(lines) do
+            removeLine(player)
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(removeLine)
+
+local function isEnemy(player)
+    return player ~= LocalPlayer and player.Team and LocalPlayer.Team and player.Team ~= LocalPlayer.Team
+end
+
+local function applyESP(player)
+    if not player.Character or espHighlights[player] then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "JumpESP"
+    highlight.Adornee = player.Character
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = player.Character
+    espHighlights[player] = highlight
+end
+
+local function removeESP(player)
+    if espHighlights[player] then
+        espHighlights[player]:Destroy()
+        espHighlights[player] = nil
+    end
+end
+
+local function cleanupConnections(player)
+    if espConnections[player] then
+        for _, connection in pairs(espConnections[player]) do
+            connection:Disconnect()
+        end
+        espConnections[player] = nil
+    end
+    removeESP(player)
+end
+
+local function setupESP(player)
+    if player == LocalPlayer then return end
+    local function onCharacterAdded(character)
+        cleanupConnections(player)
+        local humanoid = character:WaitForChild("Humanoid", 3)
+        local head = character:FindFirstChild("Head")
+        if not humanoid or not head then return end
+
+        local stateConnection = humanoid.StateChanged:Connect(function(_, newState)
+            if not espEnabled then return end
+            if isEnemy(player) then
+                if newState == Enum.HumanoidStateType.Jumping or newState == Enum.HumanoidStateType.Freefall then
+                    applyESP(player)
+                elseif newState == Enum.HumanoidStateType.Landed then
+                    removeESP(player)
+                end
+            else
+                removeESP(player)
+            end
+        end)
+
+        local heartbeatConnection = RunService.Heartbeat:Connect(function()
+            if not player.Character or not isEnemy(player) then
+                removeESP(player)
+            else
+                local state = humanoid:GetState()
+                if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+                    removeESP(player)
+                end
+            end
+        end)
+
+        espConnections[player] = { stateConnection, heartbeatConnection }
+    end
+
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    player.CharacterAdded:Connect(onCharacterAdded)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    setupESP(player)
+end
+Players.PlayerAdded:Connect(setupESP)
+
+VisualTab:Section({ Title = "ESP Settings" })
+
+VisualTab:Toggle({
+    Title = "ESP (Jump)",
+    Desc = "Show ESP when enemy jumps",
+    Value = true,
+    Callback = function(state)
+        espEnabled = state
+        if not state then
+            for player in pairs(espHighlights) do
+                removeESP(player)
+            end
+        end
+    end
+})
+
+MiscTab:Section({ Title = "Auto Spin" })
+
+local autoLucky = false
+local autoYen = false
+local autoAbility = false
+local autoNormal = false
+
+local Remote = ReplicatedStorage:FindFirstChild("Packages")
+if Remote then
+    Remote = Remote:FindFirstChild("_Index")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("sleitnick_knit@1.7.0")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("knit")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("Services")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("SeasonService")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("RF")
+end
+if Remote then
+    Remote = Remote:FindFirstChild("RequestRankedReward")
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1.0)
+        if Remote then
+            if autoLucky then
+                Remote:InvokeServer(1)
+            end
+            if autoYen then
+                Remote:InvokeServer(2)
+            end
+            if autoAbility then
+                Remote:InvokeServer(4)
+            end
+            if autoNormal then
+                Remote:InvokeServer(5)
+            end
+        end
+    end
+end)
+
+MiscTab:Toggle({
+    Title = "Lucky Spin (Bronze 2)",
+    Desc = "Auto claim lucky spin",
+    Value = false,
+    Callback = function(state)
+        autoLucky = state
+    end
+})
+
+MiscTab:Toggle({
+    Title = "Yen (Bronze 3)",
+    Desc = "Auto claim yen",
+    Value = false,
+    Callback = function(state)
+        autoYen = state
+    end
+})
+
+MiscTab:Toggle({
+    Title = "Ability (Bronze 4)",
+    Desc = "Auto claim ability",
+    Value = false,
+    Callback = function(state)
+        autoAbility = state
+    end
+})
+
+MiscTab:Toggle({
+    Title = "Normal Spin (Gold 1)",
+    Desc = "Auto claim normal spin",
+    Value = false,
+    Callback = function(state)
+        autoNormal = state
+    end
+})
+
+MiscTab:Section({ Title = "Auto Style Spin" })
+
+local autoSpin = false
+local desiredStyles = {}
+local spinType = "Normal"
+
+local allStyles = {
+    "Hinto", "Tonkura", "Hakochi", "Kishoti", "Sagumi", "Yachikusai",
+    "Ninyoku", "Tsuchiro", "Oyatsu", "Imaezi",
+    "Uchikai", "Azmei", "Yokai", "Kozei", "Sazuroku", "Yomomute", "Kyoshin",
+    "Kyamo", "Bakuri", "Okazu", "Hirakumi",
+    "Sanju", "Kazana", "Timeskip Okazu", "Timeskip Kyamo", "Timeskip Hinto",
+    "Jinko", "Yogan", "Mikage", "Taichou", "Kisuki", "The Twins",
+    "Kumo", "Kijo", "Encho", "Riku"
+}
+
+MiscTab:Toggle({
+    Title = "Auto Style Spin",
+    Desc = "Auto spin until you get your desired style",
+    Value = false,
+    Callback = function(state)
+        autoSpin = state
+        if autoSpin then
+            startAutoSpin()
+        end
+    end
+})
+
+MiscTab:Dropdown({
+    Title = "Style Spin Type",
+    Desc = "Select spin type",
+    Multi = false,
+    Values = {"Normal", "Lucky"},
+    Default = "Normal",
+    Callback = function(selected)
+        spinType = selected
+    end
+})
+
+MiscTab:Dropdown({
+    Title = "Desired Styles",
+    Desc = "Select styles to target (Multiple)",
+    Multi = true,
+    Values = allStyles,
+    Default = {"Hinto"},
+    Callback = function(selected)
+        desiredStyles = selected
+        if #desiredStyles > 0 then
+            WindUI:Notify({ Title = "Styles Selected", Content = #desiredStyles .. " styles selected!", Duration = 2 })
+        end
+    end
+})
+
+function startAutoSpin()
+    coroutine.wrap(function()
+        while autoSpin do
+            local currentStyle = game:GetService("Players").LocalPlayer.PlayerGui.Interface.Lobby.Styles.TopPanel.DisplayName.Text
+            
+            for _, style in ipairs(desiredStyles) do
+                if currentStyle == style then
+                    autoSpin = false
+                    WindUI:Notify({ Title = "Style Obtained", Content = currentStyle, Duration = 4 })
+                    return
+                end
+            end
+            
+            local args = { [1] = (spinType == "Lucky") }
+            local StyleService = nil
+            local Knit2 = ReplicatedStorage:FindFirstChild("Packages")
+            if Knit2 then
+                Knit2 = Knit2:FindFirstChild("_Index")
+            end
+            if Knit2 then
+                Knit2 = Knit2:FindFirstChild("sleitnick_knit@1.7.0")
+            end
+            if Knit2 then
+                Knit2 = Knit2:FindFirstChild("knit")
+            end
+            if Knit2 then
+                Knit2 = Knit2:FindFirstChild("Services")
+            end
+            if Knit2 then
+                StyleService = Knit2:FindFirstChild("StyleService")
+            end
+            if StyleService then
+                local RF = StyleService:FindFirstChild("RF")
+                if RF then
+                    local Roll = RF:FindFirstChild("Roll")
+                    if Roll then
+                        Roll:InvokeServer(unpack(args))
+                    end
+                end
+            end
+            task.wait(0)
+        end
+    end)()
+end
+
+MiscTab:Section({ Title = "Auto Ability Spin" })
+
+local autoAbilitySpin = false
+local desiredAbilities = {}
+local abilitySpinType = "Normal"
+
+local allAbilities = {
+    "Shield Breaker",
+    "Magnetic Pull",
+    "Lead Feet",
+    "Extra Touch",
+    "Redirection Jump",
+    "Curve Spike",
+    "Divine Strength",
+    "Steel Block",
+    "Zero Gravity Set",
+    "Boom Jump",
+    "Moonball",
+    "Super Sprint",
+    "Team Spirit",
+    "Rolling Thunder"
+}
+
+MiscTab:Toggle({
+    Title = "Auto Ability Spin",
+    Desc = "Auto spin until you get your desired ability",
+    Value = false,
+    Callback = function(state)
+        autoAbilitySpin = state
+        if autoAbilitySpin then
+            startAutoAbilitySpin()
+        end
+    end
+})
+
+MiscTab:Dropdown({
+    Title = "Ability Spin Type",
+    Desc = "Select spin type",
+    Multi = false,
+    Values = {"Normal", "Lucky"},
+    Default = "Normal",
+    Callback = function(selected)
+        abilitySpinType = selected
+    end
+})
+
+MiscTab:Dropdown({
+    Title = "Desired Abilities",
+    Desc = "Select abilities to target (Multiple)",
+    Multi = true,
+    Values = allAbilities,
+    Default = {"Shield Breaker"},
+    Callback = function(selected)
+        desiredAbilities = selected
+        if #desiredAbilities > 0 then
+            WindUI:Notify({ Title = "Abilities Selected", Content = #desiredAbilities .. " abilities selected!", Duration = 2 })
+        end
+    end
+})
+
+function startAutoAbilitySpin()
+    coroutine.wrap(function()
+        while autoAbilitySpin do
+            local currentAbility = game:GetService("Players").LocalPlayer.PlayerGui.Interface.Lobby.Abilities.TopPanel.DisplayName.Text
+            
+            for _, ability in ipairs(desiredAbilities) do
+                if currentAbility == ability then
+                    autoAbilitySpin = false
+                    WindUI:Notify({ Title = "Ability Obtained", Content = currentAbility, Duration = 4 })
+                    return
+                end
+            end
+            
+            local args = { [1] = (abilitySpinType == "Lucky") }
+            local AbilityService = nil
+            local Knit3 = ReplicatedStorage:FindFirstChild("Packages")
+            if Knit3 then
+                Knit3 = Knit3:FindFirstChild("_Index")
+            end
+            if Knit3 then
+                Knit3 = Knit3:FindFirstChild("sleitnick_knit@1.7.0")
+            end
+            if Knit3 then
+                Knit3 = Knit3:FindFirstChild("knit")
+            end
+            if Knit3 then
+                Knit3 = Knit3:FindFirstChild("Services")
+            end
+            if Knit3 then
+                AbilityService = Knit3:FindFirstChild("AbilityService")
+            end
+            if AbilityService then
+                local RF = AbilityService:FindFirstChild("RF")
+                if RF then
+                    local Roll = RF:FindFirstChild("Roll")
+                    if Roll then
+                        Roll:InvokeServer(unpack(args))
+                    end
+                end
+            end
+            task.wait(0)
+        end
+    end)()
+end
+
+MiscTab:Section({ Title = "Auto Claim" })
+
+local function fetchNewCodes()
+    local success, data = pcall(function()
+        return game:HttpGet("https://beebom.com/haikyuu-legends-codes/")
+    end)
+    
+    if not success or not data then
+        return {}
+    end
+    
+    local newCodes = {}
+    local processed = {}
+    
+    for line in string.gmatch(data, "[^\n]+") do
+        if string.find(line, "(NEW)") then
+            local code = string.match(line, "(%u+[%u%d_]+)")
+            if code and not processed[code] then
+                processed[code] = true
+                table.insert(newCodes, code)
+            end
+        end
+        if #newCodes >= 3 then
+            break
+        end
+    end
+    
+    return newCodes
+end
+
+MiscTab:Button({
+    Title = "Claim Level Rewards",
+    Desc = "Claim level rewards",
+    Callback = function()
+        local LevelService = nil
+        local Knit4 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit4 then
+            Knit4 = Knit4:FindFirstChild("_Index")
+        end
+        if Knit4 then
+            Knit4 = Knit4:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit4 then
+            Knit4 = Knit4:FindFirstChild("knit")
+        end
+        if Knit4 then
+            Knit4 = Knit4:FindFirstChild("Services")
+        end
+        if Knit4 then
+            LevelService = Knit4:FindFirstChild("LevelService")
+        end
+        if LevelService then
+            local RF = LevelService:FindFirstChild("RF")
+            if RF then
+                local ClaimLevelRewards = RF:FindFirstChild("ClaimLevelRewards")
+                if ClaimLevelRewards then
+                    ClaimLevelRewards:InvokeServer()
+                    WindUI:Notify({ Title = "Level Rewards", Content = "Level rewards claimed!", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+MiscTab:Button({
+    Title = "Claim Quest Rewards",
+    Desc = "Claim quest rewards",
+    Callback = function()
+        local QuestService = nil
+        local Knit5 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit5 then
+            Knit5 = Knit5:FindFirstChild("_Index")
+        end
+        if Knit5 then
+            Knit5 = Knit5:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit5 then
+            Knit5 = Knit5:FindFirstChild("knit")
+        end
+        if Knit5 then
+            Knit5 = Knit5:FindFirstChild("Services")
+        end
+        if Knit5 then
+            QuestService = Knit5:FindFirstChild("QuestService")
+        end
+        if QuestService then
+            local RF = QuestService:FindFirstChild("RF")
+            if RF then
+                local ClaimAll = RF:FindFirstChild("ClaimAll")
+                if ClaimAll then
+                    ClaimAll:InvokeServer(true)
+                    WindUI:Notify({ Title = "Quest Rewards", Content = "Quest rewards claimed!", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+MiscTab:Button({
+    Title = "Redeem All Codes",
+    Desc = "Fetch and redeem all codes",
+    Callback = function()
+        local newCodes = fetchNewCodes()
+        
+        if #newCodes > 0 then
+            for i, code in pairs(newCodes) do
+                local CodeService = nil
+                local Knit6 = ReplicatedStorage:FindFirstChild("Packages")
+                if Knit6 then
+                    Knit6 = Knit6:FindFirstChild("_Index")
+                end
+                if Knit6 then
+                    Knit6 = Knit6:FindFirstChild("sleitnick_knit@1.7.0")
+                end
+                if Knit6 then
+                    Knit6 = Knit6:FindFirstChild("knit")
+                end
+                if Knit6 then
+                    Knit6 = Knit6:FindFirstChild("Services")
+                end
+                if Knit6 then
+                    CodeService = Knit6:FindFirstChild("CodeService")
+                end
+                if CodeService then
+                    local RF = CodeService:FindFirstChild("RF")
+                    if RF then
+                        local Redeem = RF:FindFirstChild("Redeem")
+                        if Redeem then
+                            pcall(function()
+                                Redeem:InvokeServer(code)
+                            end)
+                        end
+                    end
+                end
+                task.wait(0.01)
+            end
+            WindUI:Notify({ Title = "Codes Redeemed", Content = "All codes redeemed!", Duration = 3 })
+        else
+            WindUI:Notify({ Title = "No Codes", Content = "No codes found!", Duration = 3 })
+        end
+    end
+})
+
+MiscTab:Section({ Title = "Quick Actions" })
+
+MiscTab:Button({
+    Title = "Rejoin",
+    Desc = "Rejoin the game",
+    Callback = function()
+        rejoin()
+    end
+})
+
+MiscTab:Button({
+    Title = "Panic",
+    Desc = "Turn off all features",
+    Callback = function()
+        removeHitboxes()
+        autoShiftLock = false
+        airMovement = false
+        linesEnabled = false
+        autoLucky = false
+        autoYen = false
+        autoAbility = false
+        autoNormal = false
+        autoSpin = false
+        autoAbilitySpin = false
+        silentSpikeEnabled = false
+        fastAttackEnabled = false
+        fastAttackManualEnabled = false
+        jumpSpikeEnabled = false
+        infChargeEnabled = false
+        sanjuTiltEnabled = false
+        redirectSpikeEnabled = false
+        maxChargeEnabled = false
+        disableJumps()
+        disableSanjuTilt()
+        disableRedirectSpike()
+        disableMaxCharge()
+        if spikeButton then
+            spikeButton.Visible = false
+        end
+        for player in pairs(lines) do
+            removeLine(player)
+        end
+        WindUI:Notify({ Title = "Panic Mode", Content = "All features disabled", Duration = 3 })
+    end
+})
+
+GameJoinTab:Section({ Title = "Game Modes" })
+
+GameJoinTab:Button({
+    Title = "Chaos Mode",
+    Desc = "Join Chaos Mode",
+    Callback = function()
+        local args = { [1] = "ChaosMode" }
+        local PartyService = nil
+        local Knit7 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit7 then
+            Knit7 = Knit7:FindFirstChild("_Index")
+        end
+        if Knit7 then
+            Knit7 = Knit7:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit7 then
+            Knit7 = Knit7:FindFirstChild("knit")
+        end
+        if Knit7 then
+            Knit7 = Knit7:FindFirstChild("Services")
+        end
+        if Knit7 then
+            PartyService = Knit7:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "Chaos Mode...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "1v1 Mini Map",
+    Desc = "Join 1v1 Mini Map",
+    Callback = function()
+        local args = { [1] = "OnesMini" }
+        local PartyService = nil
+        local Knit8 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit8 then
+            Knit8 = Knit8:FindFirstChild("_Index")
+        end
+        if Knit8 then
+            Knit8 = Knit8:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit8 then
+            Knit8 = Knit8:FindFirstChild("knit")
+        end
+        if Knit8 then
+            Knit8 = Knit8:FindFirstChild("Services")
+        end
+        if Knit8 then
+            PartyService = Knit8:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "1v1 Mini Map...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "2v2 Ranked",
+    Desc = "Join 2v2 Ranked",
+    Callback = function()
+        local args = { [1] = "Twos" }
+        local PartyService = nil
+        local Knit9 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit9 then
+            Knit9 = Knit9:FindFirstChild("_Index")
+        end
+        if Knit9 then
+            Knit9 = Knit9:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit9 then
+            Knit9 = Knit9:FindFirstChild("knit")
+        end
+        if Knit9 then
+            Knit9 = Knit9:FindFirstChild("Services")
+        end
+        if Knit9 then
+            PartyService = Knit9:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "2v2 Ranked...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "3v3 Ranked",
+    Desc = "Join 3v3 Ranked",
+    Callback = function()
+        local args = { [1] = "Threes" }
+        local PartyService = nil
+        local Knit10 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit10 then
+            Knit10 = Knit10:FindFirstChild("_Index")
+        end
+        if Knit10 then
+            Knit10 = Knit10:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit10 then
+            Knit10 = Knit10:FindFirstChild("knit")
+        end
+        if Knit10 then
+            Knit10 = Knit10:FindFirstChild("Services")
+        end
+        if Knit10 then
+            PartyService = Knit10:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "3v3 Ranked...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "4v4 Ranked",
+    Desc = "Join 4v4 Ranked",
+    Callback = function()
+        local args = { [1] = "Fours" }
+        local PartyService = nil
+        local Knit11 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit11 then
+            Knit11 = Knit11:FindFirstChild("_Index")
+        end
+        if Knit11 then
+            Knit11 = Knit11:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit11 then
+            Knit11 = Knit11:FindFirstChild("knit")
+        end
+        if Knit11 then
+            Knit11 = Knit11:FindFirstChild("Services")
+        end
+        if Knit11 then
+            PartyService = Knit11:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "4v4 Ranked...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "6v6 Ranked",
+    Desc = "Join 6v6 Ranked",
+    Callback = function()
+        local args = { [1] = "Sixes" }
+        local PartyService = nil
+        local Knit12 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit12 then
+            Knit12 = Knit12:FindFirstChild("_Index")
+        end
+        if Knit12 then
+            Knit12 = Knit12:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit12 then
+            Knit12 = Knit12:FindFirstChild("knit")
+        end
+        if Knit12 then
+            Knit12 = Knit12:FindFirstChild("Services")
+        end
+        if Knit12 then
+            PartyService = Knit12:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "6v6 Ranked...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+GameJoinTab:Button({
+    Title = "Training",
+    Desc = "Join Training",
+    Callback = function()
+        local args = { [1] = "Training" }
+        local PartyService = nil
+        local Knit13 = ReplicatedStorage:FindFirstChild("Packages")
+        if Knit13 then
+            Knit13 = Knit13:FindFirstChild("_Index")
+        end
+        if Knit13 then
+            Knit13 = Knit13:FindFirstChild("sleitnick_knit@1.7.0")
+        end
+        if Knit13 then
+            Knit13 = Knit13:FindFirstChild("knit")
+        end
+        if Knit13 then
+            Knit13 = Knit13:FindFirstChild("Services")
+        end
+        if Knit13 then
+            PartyService = Knit13:FindFirstChild("PartyService")
+        end
+        if PartyService then
+            local RF = PartyService:FindFirstChild("RF")
+            if RF then
+                local RequestTeleport = RF:FindFirstChild("RequestTeleport")
+                if RequestTeleport then
+                    RequestTeleport:InvokeServer(unpack(args))
+                    WindUI:Notify({ Title = "Joining", Content = "Training...", Duration = 3 })
+                end
+            end
+        end
+    end
+})
+
+ConfigTab:Section({ Title = "Bug Report" })
+
+ConfigTab:Paragraph({
+    Title = "Bug Report",
+    Content = "Report any bugs you find in the hub!"
+})
+
+local bugReportSent = false
+
+ConfigTab:Input({
+    Title = "Bug Description",
+    Desc = "Describe the bug you found",
+    Value = "",
+    Callback = function(text)
+        _G.BugReportText = text
+    end
+})
+
+ConfigTab:Button({
+    Title = "Submit Bug Report",
+    Desc = "Send bug report to developers",
+    Callback = function()
+        if bugReportSent then
+            WindUI:Notify({ Title = "Error", Content = "You have already sent a bug report!", Duration = 3 })
+            return
+        end
+        
+        local msg = _G.BugReportText or ""
+        if msg == "" then
+            WindUI:Notify({ Title = "Error", Content = "Please describe the bug first!", Duration = 3 })
+            return
+        end
+        
+        pcall(function()
+            game:HttpGet(API_URL .. "/bugreport?message=" .. HttpService:UrlEncode(msg))
+            bugReportSent = true
+            WindUI:Notify({ Title = "Bug Report", Content = "Report sent successfully!", Duration = 3 })
+            _G.BugReportText = ""
+        end)
+    end
+})
+
+ConfigTab:Section({ Title = "Feedback" })
+
+ConfigTab:Paragraph({
+    Title = "Feedback",
+    Content = "Share your thoughts about the hub!"
+})
+
+local feedbackSent = false
+
+ConfigTab:Input({
+    Title = "Your Feedback",
+    Desc = "Type your feedback here",
+    Value = "",
+    Callback = function(text)
+        _G.FeedbackText = text
+    end
+})
+
+ConfigTab:Button({
+    Title = "Submit Feedback",
+    Desc = "Send feedback to developers",
+    Callback = function()
+        if feedbackSent then
+            WindUI:Notify({ Title = "Error", Content = "You have already sent feedback!", Duration = 3 })
+            return
+        end
+        
+        local msg = _G.FeedbackText or ""
+        if msg == "" then
+            WindUI:Notify({ Title = "Error", Content = "Please enter your feedback first!", Duration = 3 })
+            return
+        end
+        
+        pcall(function()
+            game:HttpGet(API_URL .. "/feedback?username=" .. LocalPlayer.Name .. "&message=" .. HttpService:UrlEncode(msg))
+            feedbackSent = true
+            WindUI:Notify({ Title = "Feedback", Content = "Feedback sent successfully!", Duration = 3 })
+            _G.FeedbackText = ""
+        end)
+    end
+})
+
+ConfigTab:Section({ Title = "Config Manager" })
+
+local configName = ""
+
+ConfigTab:Input({
+    Title = "Config Name",
+    Desc = "Enter config name",
+    Value = "",
+    Callback = function(text)
+        configName = text
+    end
+})
+
+ConfigTab:Button({
+    Title = "Save Config",
+    Desc = "Save current settings as config",
+    Callback = function()
+        if configName == "" then
+            WindUI:Notify({ Title = "Error", Content = "Please enter a config name!", Duration = 3 })
+            return
+        end
+        
+        local configData = {
+            Name = configName,
+            HitboxScale = hitboxScale,
+            HitboxColor = hitboxColorName,
+            LinesEnabled = linesEnabled,
+            LineDistance = lineDistance,
+            ESPEnabled = espEnabled,
+            AutoShiftLock = autoShiftLock,
+            AirMovement = airMovement,
+            AirMovementSpeed = airMovementSpeed,
+            SilentSpike = silentSpikeEnabled,
+            FastAttack = fastAttackEnabled,
+            FastAttackManual = fastAttackManualEnabled,
+            JumpSpike = jumpSpikeEnabled,
+            InfCharge = infChargeEnabled,
+            SanjuTilt = sanjuTiltEnabled,
+            RedirectSpike = redirectSpikeEnabled,
+            MaxCharge = maxChargeEnabled,
+            AntiLag = false
+        }
+        
+        local success, json = pcall(function()
+            return HttpService:JSONEncode(configData)
+        end)
+        
+        if success then
+            local folder = "AnonyHubConfigs"
+            if not isfolder(folder) then
+                makefolder(folder)
+            end
+            
+            local filePath = folder .. "/" .. configName .. ".json"
+            writefile(filePath, json)
+            WindUI:Notify({ Title = "Config Saved", Content = "Config '" .. configName .. "' saved!", Duration = 3 })
+        else
+            WindUI:Notify({ Title = "Error", Content = "Failed to save config!", Duration = 3 })
+        end
+    end
+})
+
+ConfigTab:Button({
+    Title = "Load Config",
+    Desc = "Load a saved config",
+    Callback = function()
+        if configName == "" then
+            WindUI:Notify({ Title = "Error", Content = "Please enter a config name!", Duration = 3 })
+            return
+        end
+        
+        local folder = "AnonyHubConfigs"
+        local filePath = folder .. "/" .. configName .. ".json"
+        
+        if not isfile(filePath) then
+            WindUI:Notify({ Title = "Error", Content = "Config '" .. configName .. "' not found!", Duration = 3 })
+            return
+        end
+        
+        local success, data = pcall(function()
+            return readfile(filePath)
+        end)
+        
+        if success then
+            local decoded = HttpService:JSONDecode(data)
+            
+            hitboxScale = decoded.HitboxScale or 5.0
+            hitboxColorName = decoded.HitboxColor or "Green"
+            local colors = {
+                Green = Color3.fromRGB(0, 255, 0),
+                Blue = Color3.fromRGB(0, 0, 255),
+                Red = Color3.fromRGB(255, 0, 0),
+                Yellow = Color3.fromRGB(255, 255, 0),
+                Purple = Color3.fromRGB(128, 0, 128),
+                Orange = Color3.fromRGB(255, 165, 0),
+                Pink = Color3.fromRGB(255, 105, 180),
+                White = Color3.fromRGB(255, 255, 255)
+            }
+            hitboxColor = colors[hitboxColorName] or Color3.fromRGB(0, 255, 0)
+            linesEnabled = decoded.LinesEnabled ~= nil and decoded.LinesEnabled or true
+            lineDistance = decoded.LineDistance or 50
+            espEnabled = decoded.ESPEnabled ~= nil and decoded.ESPEnabled or true
+            autoShiftLock = decoded.AutoShiftLock or false
+            airMovement = decoded.AirMovement or false
+            airMovementSpeed = decoded.AirMovementSpeed or 16
+            silentSpikeEnabled = decoded.SilentSpike or false
+            fastAttackEnabled = decoded.FastAttack or false
+            fastAttackManualEnabled = decoded.FastAttackManual or false
+            jumpSpikeEnabled = decoded.JumpSpike or false
+            infChargeEnabled = decoded.InfCharge or false
+            sanjuTiltEnabled = decoded.SanjuTilt or false
+            redirectSpikeEnabled = decoded.RedirectSpike or false
+            maxChargeEnabled = decoded.MaxCharge or false
+            
+            if sanjuTiltEnabled then
+                enableSanjuTilt()
+            end
+            
+            if redirectSpikeEnabled then
+                enableRedirectSpike()
+            end
+            
+            if maxChargeEnabled then
+                enableMaxCharge()
+            end
+            
+            if spikeButton then
+                spikeButton.Visible = silentSpikeEnabled
+            end
+            
+            if silentSpikeEnabled or fastAttackEnabled or fastAttackManualEnabled or jumpSpikeEnabled then
+                enableJumps()
+            end
+            
+            updateHitboxes(hitboxScale)
+            
+            WindUI:Notify({ Title = "Config Loaded", Content = "Config '" .. configName .. "' loaded!", Duration = 3 })
+        else
+            WindUI:Notify({ Title = "Error", Content = "Failed to load config!", Duration = 3 })
+        end
+    end
+})
+
+ConfigTab:Button({
+    Title = "Delete Config",
+    Desc = "Delete a saved config",
+    Callback = function()
+        if configName == "" then
+            WindUI:Notify({ Title = "Error", Content = "Please enter a config name!", Duration = 3 })
+            return
+        end
+        
+        local folder = "AnonyHubConfigs"
+        local filePath = folder .. "/" .. configName .. ".json"
+        
+        if not isfile(filePath) then
+            WindUI:Notify({ Title = "Error", Content = "Config '" .. configName .. "' not found!", Duration = 3 })
+            return
+        end
+        
+        delfile(filePath)
+        WindUI:Notify({ Title = "Config Deleted", Content = "Config '" .. configName .. "' deleted!", Duration = 3 })
+    end
+})
+
+ConfigTab:Button({
+    Title = "List Configs",
+    Desc = "List all saved configs",
+    Callback = function()
+        local folder = "AnonyHubConfigs"
+        if not isfolder(folder) then
+            WindUI:Notify({ Title = "No Configs", Content = "No configs found!", Duration = 3 })
+            return
+        end
+        
+        local files = listfiles(folder)
+        local configList = {}
+        
+        for _, file in ipairs(files) do
+            local name = string.match(file, "([^/]+)%.json$")
+            if name then
+                table.insert(configList, name)
+            end
+        end
+        
+        if #configList == 0 then
+            WindUI:Notify({ Title = "No Configs", Content = "No configs found!", Duration = 3 })
+            return
+        end
+        
+        local message = "Configs:\n" .. table.concat(configList, "\n")
+        WindUI:Notify({ Title = "Config List", Content = message, Duration = 5 })
+    end
+})
+
+ConfigTab:Section({ Title = "Credits" })
+
+ConfigTab:Paragraph({
+    Title = "Astryx Team",
+    Content = "Thanks for using Astryx Hub!\nMade with by Astryz Team"
+})
+
+ConfigTab:Button({
+    Title = "Discord Server",
+    Desc = "Join our Discord",
+    Callback = function()
+        local DiscordURL = "https://discord.gg/anonyhub"
+        setclipboard(DiscordURL)
+        WindUI:Notify({ Title = "Copied!", Content = "Discord link copied to clipboard!", Duration = 2 })
+    end
+})
+
+WindUI:Notify({
+    Title = "Astrtx",
+    Content = "Welcome to Astryx Hub v2.0!",
+    Duration = 4
+})
